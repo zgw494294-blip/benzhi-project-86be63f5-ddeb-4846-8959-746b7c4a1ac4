@@ -102,10 +102,14 @@ func (s *Service) AddSegment(ctx context.Context, caseID, key string, cmd Segmen
 	if err := authorize(cmd.Actor, roleOrganizer); err != nil {
 		return CaseView{}, err
 	}
+	// 当调用方省略可选片段 ID 时，由服务分配。该分配不得进入幂等指纹，
+	// 否则同一请求重放时会因随机 ID 不同而被判定为幂等冲突。指纹仅覆盖调用方提供的值，
+	// 分配的 ID 在重放时直接复用首次保存的结果，因此不会重复创建片段。
+	m := meta(key, "add_segment", cmd.Actor, cmd)
 	if cmd.ID == "" {
 		cmd.ID = newID("segment")
 	}
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "add_segment", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
+	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, m, func(c *domain.ReleaseCase) error {
 		return c.AddSegment(domain.TranscriptSegment{ID: cmd.ID, StartMillis: cmd.StartMillis, EndMillis: cmd.EndMillis, SourceText: cmd.SourceText, ProposedText: cmd.ProposedText, SensitivityTag: cmd.SensitivityTag}, cmd.Actor, s.now())
 	})
 	if err != nil {
@@ -175,11 +179,15 @@ func (s *Service) AddConsent(ctx context.Context, caseID, key string, cmd Consen
 	if err := authorize(cmd.Actor, roleOrganizer); err != nil {
 		return CaseView{}, err
 	}
+	// 当调用方省略可选授权 ID 时，由服务分配。该分配不得进入幂等指纹，
+	// 否则同一请求重放时会因随机 ID 不同而被判定为幂等冲突。指纹仅覆盖调用方提供的值，
+	// 分配的 ID 在重放时直接复用首次保存的结果，因此不会重复创建授权。
+	m := meta(key, "add_consent", cmd.Actor, cmd)
 	if cmd.ID == "" {
 		cmd.ID = newID("consent")
 	}
 	g := domain.ConsentGrant{ID: cmd.ID, Scope: cmd.Scope, AllowedUses: cmd.AllowedUses, Restrictions: cmd.Restrictions, ValidFrom: cmd.ValidFrom, ExpiresAt: cmd.ExpiresAt, SignedBy: cmd.SignedBy, SignedAt: cmd.SignedAt}
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "add_consent", cmd.Actor, cmd), func(c *domain.ReleaseCase) error { return c.AddConsent(g, cmd.Actor, s.now()) })
+	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, m, func(c *domain.ReleaseCase) error { return c.AddConsent(g, cmd.Actor, s.now()) })
 	if err != nil {
 		return CaseView{}, err
 	}
