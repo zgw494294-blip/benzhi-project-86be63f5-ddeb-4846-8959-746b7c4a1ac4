@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"sync"
 
 	"oral-history-release-studio/internal/domain"
 )
@@ -16,7 +17,10 @@ type credentialSegmentsCacheKey struct {
 	contentHash string
 }
 
-var approvedCredentialSegments = map[credentialSegmentsCacheKey][]domain.CredentialSegment{}
+var (
+	credentialCacheMu          sync.RWMutex
+	approvedCredentialSegments = map[credentialSegmentsCacheKey][]domain.CredentialSegment{}
+)
 
 const maxApprovedCredentialCacheEntries = 128
 
@@ -33,17 +37,24 @@ func cachedCredentialSegments(rc *domain.ReleaseCase) ([]domain.CredentialSegmen
 	if rc.State != domain.StateApproved {
 		return nil, false
 	}
+	credentialCacheMu.RLock()
+	defer credentialCacheMu.RUnlock()
 	items, ok := approvedCredentialSegments[credentialCacheKey(rc)]
 	return append([]domain.CredentialSegment(nil), items...), ok
 }
 
 func cacheCredentialSegments(rc *domain.ReleaseCase, items []domain.CredentialSegment) {
-	if rc.State == domain.StateApproved {
-		if len(approvedCredentialSegments) >= maxApprovedCredentialCacheEntries {
-			clear(approvedCredentialSegments)
-		}
-		approvedCredentialSegments[credentialCacheKey(rc)] = append([]domain.CredentialSegment(nil), items...)
+	if rc.State != domain.StateApproved {
+		return
 	}
+	key := credentialCacheKey(rc)
+	sealed := append([]domain.CredentialSegment(nil), items...)
+	credentialCacheMu.Lock()
+	defer credentialCacheMu.Unlock()
+	if len(approvedCredentialSegments) >= maxApprovedCredentialCacheEntries {
+		clear(approvedCredentialSegments)
+	}
+	approvedCredentialSegments[key] = sealed
 }
 
 func digest(data []byte) []byte { sum := sha256.Sum256(data); return sum[:] }
