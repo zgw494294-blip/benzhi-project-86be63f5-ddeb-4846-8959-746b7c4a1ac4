@@ -14,9 +14,19 @@ import (
 	"oral-history-release-studio/internal/domain"
 )
 
+// lockBusyRetries bounds how long an acquireFileLock call waits while a
+// concurrent process holds the directory lock before reporting a conflict.
+// Writes are short, so the wait only needs to cover the brief window in which
+// another process is committing to the same data directory.
+const (
+	lockBusyRetries = 50
+	lockBusySleep   = 10 * time.Millisecond
+)
+
 type Store struct {
 	mu           sync.Mutex
 	dir          string
+	lockPath     string
 	snapshotPath string
 	auditPath    string
 	data         snapshot
@@ -29,13 +39,15 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "snapshot.json")
-	data, err := loadSnapshot(path)
-	if err != nil {
-		return nil, err
-	}
-	s := &Store{dir: dir, snapshotPath: path, auditPath: filepath.Join(dir, "audit.jsonl"), data: data}
-	if err := recoverAuditLog(s.auditPath, data.Audit); err != nil {
+	s := &Store{dir: dir, lockPath: filepath.Join(dir, ".lock"), snapshotPath: filepath.Join(dir, "snapshot.json"), auditPath: filepath.Join(dir, "audit.jsonl")}
+	// Load and reconcile under the directory lock so concurrent openers and
+	// writers observe a consistent on-disk state.
+	if err := s.withLock(func() error {
+		if err := s.reloadLocked(); err != nil {
+			return err
+		}
+		return recoverAuditLog(s.auditPath, s.data.Audit)
+	}); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -44,6 +56,22 @@ func Open(dir string) (*Store, error) {
 func (s *Store) Create(ctx context.Context, candidate *domain.ReleaseCase, meta application.MutationMeta) (*domain.ReleaseCase, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	var result *domain.ReleaseCase
+	var replay bool
+	var retErr error
+	if err := s.withLock(func() error {
+		result, replay, retErr = s.createLocked(ctx, candidate, meta)
+		return retErr
+	}); err != nil {
+		return nil, false, err
+	}
+	return result, replay, retErr
+}
+
+func (s *Store) createLocked(ctx context.Context, candidate *domain.ReleaseCase, meta application.MutationMeta) (*domain.ReleaseCase, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -71,8 +99,8 @@ func (s *Store) Create(ctx context.Context, candidate *domain.ReleaseCase, meta 
 		return nil, false, err
 	}
 	next.Audit = append(next.Audit, e)
-	result, _ := cloneCase(c)
-	next.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: c.ID, Result: result}
+	resultCase, _ := cloneCase(c)
+	next.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: c.ID, Result: resultCase}
 	if err := s.commit(next); err != nil {
 		return nil, false, err
 	}
@@ -86,6 +114,9 @@ func (s *Store) Get(ctx context.Context, id string) (*domain.ReleaseCase, error)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if err := s.withLock(func() error { return s.reloadLocked() }); err != nil {
+		return nil, err
+	}
 	c, ok := s.data.Cases[id]
 	if !ok {
 		return nil, domain.ErrNotFound
@@ -97,6 +128,9 @@ func (s *Store) List(ctx context.Context) ([]*domain.ReleaseCase, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.withLock(func() error { return s.reloadLocked() }); err != nil {
 		return nil, err
 	}
 	ids := make([]string, 0, len(s.data.Cases))
@@ -118,6 +152,22 @@ func (s *Store) List(ctx context.Context) ([]*domain.ReleaseCase, error) {
 func (s *Store) Update(ctx context.Context, id string, expected int64, meta application.MutationMeta, mutate func(*domain.ReleaseCase) error) (*domain.ReleaseCase, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	var result *domain.ReleaseCase
+	var replay bool
+	var retErr error
+	if err := s.withLock(func() error {
+		result, replay, retErr = s.updateLocked(ctx, id, expected, meta, mutate)
+		return retErr
+	}); err != nil {
+		return nil, false, err
+	}
+	return result, replay, retErr
+}
+
+func (s *Store) updateLocked(ctx context.Context, id string, expected int64, meta application.MutationMeta, mutate func(*domain.ReleaseCase) error) (*domain.ReleaseCase, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -155,8 +205,8 @@ func (s *Store) Update(ctx context.Context, id string, expected int64, meta appl
 		return nil, false, err
 	}
 	next.Audit = append(next.Audit, e)
-	result, _ := cloneCase(c)
-	next.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: id, Result: result}
+	resultCase, _ := cloneCase(c)
+	next.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: id, Result: resultCase}
 	if err := s.commit(next); err != nil {
 		return nil, false, err
 	}
@@ -170,20 +220,38 @@ func (s *Store) SaveApprovalConfirmation(ctx context.Context, confirmation domai
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if _, exists := s.data.ApprovalConfirmations[confirmation.Token]; exists {
-		return fmt.Errorf("%w: 重复确认令牌", domain.ErrConflict)
-	}
-	next, err := cloneSnapshot(s.data)
-	if err != nil {
-		return err
-	}
-	next.ApprovalConfirmations[confirmation.Token] = confirmation
-	return s.commit(next)
+	return s.withLock(func() error {
+		if _, exists := s.data.ApprovalConfirmations[confirmation.Token]; exists {
+			return fmt.Errorf("%w: 重复确认令牌", domain.ErrConflict)
+		}
+		next, err := cloneSnapshot(s.data)
+		if err != nil {
+			return err
+		}
+		next.ApprovalConfirmations[confirmation.Token] = confirmation
+		return s.commit(next)
+	})
 }
 
 func (s *Store) UpdateWithApprovalConfirmation(ctx context.Context, id string, expected int64, meta application.MutationMeta, claimed domain.ApprovalConfirmation, now time.Time, mutate func(*domain.ReleaseCase) error) (*domain.ReleaseCase, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	var result *domain.ReleaseCase
+	var replay bool
+	var retErr error
+	if err := s.withLock(func() error {
+		result, replay, retErr = s.updateWithConfirmationLocked(ctx, id, expected, meta, claimed, now, mutate)
+		return retErr
+	}); err != nil {
+		return nil, false, err
+	}
+	return result, replay, retErr
+}
+
+func (s *Store) updateWithConfirmationLocked(ctx context.Context, id string, expected int64, meta application.MutationMeta, claimed domain.ApprovalConfirmation, now time.Time, mutate func(*domain.ReleaseCase) error) (*domain.ReleaseCase, bool, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
@@ -238,8 +306,8 @@ func (s *Store) UpdateWithApprovalConfirmation(ctx context.Context, id string, e
 		return nil, false, err
 	}
 	next.Audit = append(next.Audit, e)
-	result, _ := cloneCase(c)
-	next.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: id, Result: result}
+	resultCase, _ := cloneCase(c)
+	next.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: id, Result: resultCase}
 	if err := s.commit(next); err != nil {
 		return nil, false, err
 	}
@@ -257,5 +325,33 @@ func (s *Store) commit(next snapshot) error {
 		return fmt.Errorf("快照已提交但审计镜像待恢复: %w", err)
 	}
 	s.data = next
+	return nil
+}
+
+// withLock serializes a critical section across processes operating on the same
+// data directory. It acquires a directory-level file lock, refreshes s.data
+// from disk so concurrent commits are visible, runs fn, and releases the lock.
+// The caller must already hold s.mu.
+func (s *Store) withLock(fn func() error) error {
+	release, err := acquireFileLock(s.lockPath)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if err := s.reloadLocked(); err != nil {
+		return err
+	}
+	return fn()
+}
+
+// reloadLocked re-reads the persisted snapshot from disk so that commits made
+// by another process or Store instance on the same directory are visible. The
+// caller must hold s.mu and the directory lock.
+func (s *Store) reloadLocked() error {
+	data, err := loadSnapshot(s.snapshotPath)
+	if err != nil {
+		return err
+	}
+	s.data = data
 	return nil
 }
