@@ -15,11 +15,12 @@ import (
 )
 
 type Store struct {
-	mu           sync.Mutex
-	dir          string
-	snapshotPath string
-	auditPath    string
-	data         snapshot
+	mu             sync.Mutex
+	dir            string
+	snapshotPath   string
+	auditPath      string
+	auditPersisted int
+	data           snapshot
 }
 
 func Open(dir string) (*Store, error) {
@@ -38,6 +39,7 @@ func Open(dir string) (*Store, error) {
 	if err := recoverAuditLog(s.auditPath, data.Audit); err != nil {
 		return nil, err
 	}
+	s.auditPersisted = len(data.Audit)
 	return s, nil
 }
 
@@ -248,14 +250,15 @@ func (s *Store) UpdateWithApprovalConfirmation(ctx context.Context, id string, e
 }
 
 func (s *Store) commit(next snapshot) error {
-	oldAuditLen := len(s.data.Audit)
+	persisted := s.auditPersisted
 	if err := writeSnapshot(s.snapshotPath, next); err != nil {
 		return err
 	}
-	if err := appendAuditLog(s.auditPath, next.Audit[oldAuditLen:]); err != nil {
+	if err := appendAuditLog(s.auditPath, next.Audit[persisted:]); err != nil {
 		s.data = next
 		return fmt.Errorf("快照已提交但审计镜像待恢复: %w", err)
 	}
+	s.auditPersisted = len(next.Audit)
 	s.data = next
 	return nil
 }
