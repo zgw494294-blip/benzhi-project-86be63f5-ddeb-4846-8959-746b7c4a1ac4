@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strings"
-	"sync"
 	"time"
 
 	"oral-history-release-studio/internal/assurance"
@@ -13,19 +12,16 @@ import (
 )
 
 type Service struct {
-	repo              Repository
-	checker           *assurance.Checker
-	now               func() time.Time
-	findingQueryMu    sync.Mutex
-	findingQueryCache map[findingQueryCacheKey]FindingQueryResult
+	repo    Repository
+	checker *assurance.Checker
+	now     func() time.Time
 }
 
 func NewService(repo Repository) *Service {
 	return &Service{
-		repo:              repo,
-		checker:           assurance.NewChecker(),
-		now:               time.Now,
-		findingQueryCache: make(map[findingQueryCacheKey]FindingQueryResult),
+		repo:    repo,
+		checker: assurance.NewChecker(),
+		now:     time.Now,
 	}
 }
 func (s *Service) WithClock(clock func() time.Time) *Service { s.now = clock; return s }
