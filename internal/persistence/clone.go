@@ -7,7 +7,17 @@ import (
 )
 
 func cloneCase(in *domain.ReleaseCase) (*domain.ReleaseCase, error) {
-	out := *in
+	if in == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	var out domain.ReleaseCase
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
 	return &out, nil
 }
 func cloneSnapshot(in snapshot) (snapshot, error) {
