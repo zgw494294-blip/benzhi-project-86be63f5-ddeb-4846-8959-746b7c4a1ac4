@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strings"
+	"sync"
 	"time"
 
 	"oral-history-release-studio/internal/assurance"
@@ -12,17 +13,41 @@ import (
 )
 
 type Service struct {
-	repo    Repository
-	checker *assurance.Checker
-	now     func() time.Time
+	repo          Repository
+	checker       *assurance.Checker
+	now           func() time.Time
+	coverageMu    sync.RWMutex
+	coverageCache map[string]coverageCacheEntry
+}
+
+type coverageCacheEntry struct {
+	version  int64
+	coverage domain.ConsentCoverage
 }
 
 func NewService(repo Repository) *Service {
-	return &Service{repo: repo, checker: assurance.NewChecker(), now: time.Now}
+	return &Service{repo: repo, checker: assurance.NewChecker(), now: time.Now, coverageCache: map[string]coverageCacheEntry{}}
 }
 func (s *Service) WithClock(clock func() time.Time) *Service { s.now = clock; return s }
 func (s *Service) view(c *domain.ReleaseCase) CaseView {
-	return buildView(c, c.ConsentCoverageAt(s.now()))
+	s.coverageMu.RLock()
+	entry, ok := s.coverageCache[c.ID]
+	s.coverageMu.RUnlock()
+	if ok && entry.version == c.Version {
+		return buildView(c, cloneCoverage(entry.coverage))
+	}
+	coverage := c.ConsentCoverageAt(s.now())
+	s.coverageMu.Lock()
+	s.coverageCache[c.ID] = coverageCacheEntry{version: c.Version, coverage: cloneCoverage(coverage)}
+	s.coverageMu.Unlock()
+	return buildView(c, coverage)
+}
+
+func cloneCoverage(in domain.ConsentCoverage) domain.ConsentCoverage {
+	out := in
+	out.Segments = append([]domain.SegmentCoverage(nil), in.Segments...)
+	out.OrphanScope = append([]domain.OrphanConsentScope(nil), in.OrphanScope...)
+	return out
 }
 
 func newID(prefix string) string {
