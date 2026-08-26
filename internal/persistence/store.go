@@ -51,8 +51,7 @@ func (s *Store) Create(ctx context.Context, candidate *domain.ReleaseCase, meta 
 		if old.Fingerprint != meta.Fingerprint {
 			return nil, false, domain.ErrIdempotency
 		}
-		c, err := cloneCase(old.Result)
-		return c, true, err
+		return old.Result, true, nil
 	}
 	if _, exists := s.data.Cases[candidate.ID]; exists {
 		return nil, false, fmt.Errorf("%w: 重复案卷 ID", domain.ErrConflict)
@@ -125,8 +124,7 @@ func (s *Store) Update(ctx context.Context, id string, expected int64, meta appl
 		if old.Fingerprint != meta.Fingerprint || old.CaseID != id {
 			return nil, false, domain.ErrIdempotency
 		}
-		c, err := cloneCase(old.Result)
-		return c, true, err
+		return old.Result, true, nil
 	}
 	current, ok := s.data.Cases[id]
 	if !ok {
@@ -191,8 +189,7 @@ func (s *Store) UpdateWithApprovalConfirmation(ctx context.Context, id string, e
 		if old.Fingerprint != meta.Fingerprint || old.CaseID != id {
 			return nil, false, domain.ErrIdempotency
 		}
-		c, err := cloneCase(old.Result)
-		return c, true, err
+		return old.Result, true, nil
 	}
 	stored, ok := s.data.ApprovalConfirmations[claimed.Token]
 	if !ok {
