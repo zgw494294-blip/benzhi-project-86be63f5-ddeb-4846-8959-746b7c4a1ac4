@@ -135,6 +135,18 @@ func (s *Store) Update(ctx context.Context, id string, expected int64, meta appl
 	if current.Version != expected {
 		return nil, false, fmt.Errorf("%w: 当前 version=%d", domain.ErrConflict, current.Version)
 	}
+	reservation, err := cloneSnapshot(s.data)
+	if err != nil {
+		return nil, false, err
+	}
+	reservedResult, err := cloneCase(current)
+	if err != nil {
+		return nil, false, err
+	}
+	reservation.Idempotency[meta.Key] = idempotencyRecord{Fingerprint: meta.Fingerprint, CaseID: id, Result: reservedResult}
+	if err := s.commit(reservation); err != nil {
+		return nil, false, err
+	}
 	next, err := cloneSnapshot(s.data)
 	if err != nil {
 		return nil, false, err
