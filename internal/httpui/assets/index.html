@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>口述史公开授权工作台</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/extensions.css">
+</head>
+<body>
+  <header><div><span class="eyebrow">ORAL HISTORY / RELEASE</span><h1>公开授权工作台</h1></div><div id="connection" class="pill">准备就绪</div></header>
+  <main>
+    <aside>
+      <button id="newCase" class="primary">＋ 新建公开案卷</button>
+      <h2>案卷列表</h2><div id="caseList" class="case-list"></div>
+    </aside>
+    <section id="empty" class="empty"><div class="seal">凭</div><h2>让每一次公开都有据可查</h2><p>选择已有案卷，或创建一条从授权边界到公开凭据的完整审查记录。</p></section>
+    <section id="workspace" hidden>
+      <div class="case-head"><div><span id="caseState" class="pill"></span><h2 id="caseTitle"></h2><p id="caseMeta"></p><button id="editCase">编辑案卷信息</button></div><div class="version">VERSION <strong id="caseVersion"></strong></div></div>
+      <nav class="steps"><span>01 素材</span><span>02 授权</span><span>03 检查整改</span><span>04 公开凭据</span></nav>
+      <div class="grid">
+        <article><div class="article-title"><h3>口述史片段</h3><div><button id="addSegment">添加片段</button><button id="batchSegments">批量录入</button></div></div><div id="segments"></div></article>
+        <article><div class="article-title"><h3>受访者授权</h3><button id="addConsent">登记授权</button></div><div id="consents"></div><h4>授权覆盖预览</h4><div id="coverage"></div></article>
+      </div>
+      <article><div class="article-title"><h3>检查发现与整改</h3><div><button id="freeze">冻结待审</button><button id="check">执行全量检查</button><button id="batchReturn">批量退回所选</button></div></div><div class="filters"><select id="findingStatus"><option value="">全部状态</option><option value="open">开放</option><option value="closed">已关闭</option></select><select id="findingRule"><option value="">全部规则</option><option>CONSENT_MISSING</option><option>CONSENT_USE_CONFLICT</option><option>CONSENT_EXPIRED</option><option>SENSITIVE_UNREMEDIATED</option><option>MASK_LEAK</option></select><select id="findingSeverity"><option value="">全部级别</option><option value="blocker">阻断</option><option value="warning">警告</option></select><input id="findingSegment" placeholder="片段标识"><select id="findingTag"><option value="">全部敏感标签</option><option value="none">none</option><option value="personal">personal</option><option value="restricted">restricted</option></select><button id="applyFindingFilters">筛选</button></div><div id="findingStats"></div><div id="findings"></div></article>
+      <article class="credential"><div class="article-title"><h3>公开凭据</h3><div><button id="approve">批准并签发</button><button id="verify">校验凭据</button></div></div><div id="credential"></div></article>
+      <article><h3>审计时间线</h3><div id="timeline" class="timeline"></div></article>
+    </section>
+  </main>
+  <dialog id="modal"><form method="dialog" id="modalForm"><div id="modalBody"></div><div class="dialog-actions"><button value="cancel">取消</button><button id="modalSubmit" value="default" class="primary">提交</button></div></form></dialog>
+  <div id="toast"></div><script src="/assets/app.js" defer></script>
+</body>
+</html>
