@@ -295,7 +295,13 @@ func (s *Service) Remediate(ctx context.Context, caseID, segmentID, key string, 
 		if !c.HasReturnedOpenFinding(segmentID) {
 			return domain.FieldError{Field: "segmentId", Message: "仅可整改存在已退回开放发现的片段"}
 		}
-		return c.RemediateSegment(segmentID, cmd.ProposedText, cmd.Explanation, cmd.Actor, s.now())
+		if err := c.RemediateSegment(segmentID, cmd.ProposedText, cmd.Explanation, cmd.Actor, s.now()); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		return CaseView{}, err
