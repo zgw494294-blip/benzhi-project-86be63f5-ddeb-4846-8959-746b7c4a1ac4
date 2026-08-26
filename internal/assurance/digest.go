@@ -10,6 +10,42 @@ import (
 	"oral-history-release-studio/internal/domain"
 )
 
+type credentialSegmentsCacheKey struct {
+	caseID      string
+	version     int64
+	contentHash string
+}
+
+var approvedCredentialSegments = map[credentialSegmentsCacheKey][]domain.CredentialSegment{}
+
+const maxApprovedCredentialCacheEntries = 128
+
+func credentialCacheKey(rc *domain.ReleaseCase) credentialSegmentsCacheKey {
+	b, _ := json.Marshal(rc.Segments)
+	return credentialSegmentsCacheKey{
+		caseID:      rc.ID,
+		version:     rc.Version,
+		contentHash: hex.EncodeToString(digest(b)),
+	}
+}
+
+func cachedCredentialSegments(rc *domain.ReleaseCase) ([]domain.CredentialSegment, bool) {
+	if rc.State != domain.StateApproved {
+		return nil, false
+	}
+	items, ok := approvedCredentialSegments[credentialCacheKey(rc)]
+	return append([]domain.CredentialSegment(nil), items...), ok
+}
+
+func cacheCredentialSegments(rc *domain.ReleaseCase, items []domain.CredentialSegment) {
+	if rc.State == domain.StateApproved {
+		if len(approvedCredentialSegments) >= maxApprovedCredentialCacheEntries {
+			clear(approvedCredentialSegments)
+		}
+		approvedCredentialSegments[credentialCacheKey(rc)] = append([]domain.CredentialSegment(nil), items...)
+	}
+}
+
 func digest(data []byte) []byte { sum := sha256.Sum256(data); return sum[:] }
 
 func HashText(value string) string {
@@ -17,6 +53,9 @@ func HashText(value string) string {
 }
 
 func CredentialSegments(rc *domain.ReleaseCase) []domain.CredentialSegment {
+	if items, ok := cachedCredentialSegments(rc); ok {
+		return items
+	}
 	segments := append([]domain.TranscriptSegment(nil), rc.Segments...)
 	sort.SliceStable(segments, func(i, j int) bool {
 		if segments[i].Sequence == segments[j].Sequence {
@@ -33,6 +72,7 @@ func CredentialSegments(rc *domain.ReleaseCase) []domain.CredentialSegment {
 
 func HashManifest(rc *domain.ReleaseCase) (string, []string, error) {
 	items := CredentialSegments(rc)
+	cacheCredentialSegments(rc, items)
 	ids := make([]string, len(items))
 	for index, item := range items {
 		ids[index] = item.SegmentID
