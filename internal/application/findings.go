@@ -35,12 +35,31 @@ type FindingQueryResult struct {
 	Findings    []domain.ReviewFinding `json:"findings"`
 }
 
+type findingQueryCacheKey struct {
+	caseID         string
+	status         domain.FindingStatus
+	ruleCode       string
+	severity       domain.Severity
+	segmentID      string
+	sensitivityTag domain.SensitivityTag
+}
+
 func (s *Service) QueryFindings(ctx context.Context, caseID string, query FindingQuery) (FindingQueryResult, error) {
 	query.RuleCode = strings.TrimSpace(query.RuleCode)
 	query.SegmentID = strings.TrimSpace(query.SegmentID)
 	if err := validateFindingQuery(query); err != nil {
 		return FindingQueryResult{}, err
 	}
+	if err := ctx.Err(); err != nil {
+		return FindingQueryResult{}, err
+	}
+	cacheKey := findingQueryCacheKey{caseID: caseID, status: query.Status, ruleCode: query.RuleCode, severity: query.Severity, segmentID: query.SegmentID, sensitivityTag: query.SensitivityTag}
+	s.findingQueryMu.Lock()
+	if cached, ok := s.findingQueryCache[cacheKey]; ok {
+		s.findingQueryMu.Unlock()
+		return cloneFindingQueryResult(cached), nil
+	}
+	s.findingQueryMu.Unlock()
 	c, err := s.repo.Get(ctx, caseID)
 	if err != nil {
 		return FindingQueryResult{}, err
@@ -88,7 +107,21 @@ func (s *Service) QueryFindings(ctx context.Context, caseID string, query Findin
 	})
 	stats.MatchedTotal = len(matched)
 	stats.AffectedSegments = len(affected)
-	return FindingQueryResult{CaseID: c.ID, CaseVersion: c.Version, Filters: query, Statistics: stats, Findings: matched}, nil
+	result := FindingQueryResult{CaseID: c.ID, CaseVersion: c.Version, Filters: query, Statistics: stats, Findings: matched}
+	s.findingQueryMu.Lock()
+	s.findingQueryCache[cacheKey] = cloneFindingQueryResult(result)
+	s.findingQueryMu.Unlock()
+	return result, nil
+}
+
+func cloneFindingQueryResult(in FindingQueryResult) FindingQueryResult {
+	out := in
+	out.Findings = append([]domain.ReviewFinding(nil), in.Findings...)
+	out.Statistics.RuleCounts = make(map[string]int, len(in.Statistics.RuleCounts))
+	for code, count := range in.Statistics.RuleCounts {
+		out.Statistics.RuleCounts[code] = count
+	}
+	return out
 }
 
 func validateFindingQuery(query FindingQuery) error {
