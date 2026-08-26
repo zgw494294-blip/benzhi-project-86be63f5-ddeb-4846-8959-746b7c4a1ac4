@@ -1,6 +1,6 @@
 # BENZHI_README
 
-基于 Go 实现的oral-history-release-studio Web 项目，一款后端服务，用于支持oral-history-release-studio的核心业务流程。
+基于 Go 实现的口述史公开授权 Web 项目，一款后端服务，用于管理口述史授权边界、敏感片段处置、整改复核和公开放行。
 
 ## 项目说明
 - 项目：benzhi-project-86be63f5-ddeb-4846-8959-746b7c4a1ac4
