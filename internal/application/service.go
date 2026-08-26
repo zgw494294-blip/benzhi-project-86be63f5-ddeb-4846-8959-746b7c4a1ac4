@@ -53,7 +53,7 @@ func (s *Service) CreateCase(ctx context.Context, key string, cmd CreateCaseComm
 	if err != nil {
 		return CaseView{}, err
 	}
-	saved, _, err := s.repo.Create(ctx, c, meta(key, "create_case", cmd.Actor, cmd))
+	saved, _, err := s.repo.Create(context.WithoutCancel(ctx), c, meta(key, "create_case", cmd.Actor, cmd))
 	if err != nil {
 		return CaseView{}, err
 	}
@@ -86,7 +86,7 @@ func (s *Service) UpdateMetadata(ctx context.Context, caseID, key string, cmd Me
 	if err := authorize(cmd.Actor, roleOrganizer); err != nil {
 		return CaseView{}, err
 	}
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "update_metadata", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
+	c, _, err := s.repo.Update(context.WithoutCancel(ctx), caseID, cmd.ExpectedVersion, meta(key, "update_metadata", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
 		return c.UpdateMetadata(cmd.Title, cmd.IntervieweeRef, cmd.IntendedUse, cmd.Actor, s.now())
 	})
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *Service) AddSegment(ctx context.Context, caseID, key string, cmd Segmen
 	if cmd.ID == "" {
 		cmd.ID = newID("segment")
 	}
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "add_segment", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
+	c, _, err := s.repo.Update(context.WithoutCancel(ctx), caseID, cmd.ExpectedVersion, meta(key, "add_segment", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
 		return c.AddSegment(domain.TranscriptSegment{ID: cmd.ID, StartMillis: cmd.StartMillis, EndMillis: cmd.EndMillis, SourceText: cmd.SourceText, ProposedText: cmd.ProposedText, SensitivityTag: cmd.SensitivityTag}, cmd.Actor, s.now())
 	})
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *Service) AddSegmentsBatch(ctx context.Context, caseID, key string, cmd 
 	for index, item := range cmd.Segments {
 		segments[index] = domain.TranscriptSegment{ID: item.ID, StartMillis: item.StartMillis, EndMillis: item.EndMillis, SourceText: item.SourceText, SensitivityTag: item.SensitivityTag, ProposedText: item.ProposedText}
 	}
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "add_segments_batch", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
+	c, _, err := s.repo.Update(context.WithoutCancel(ctx), caseID, cmd.ExpectedVersion, meta(key, "add_segments_batch", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
 		return c.AddSegmentsBatch(segments, cmd.Actor, s.now())
 	})
 	if err != nil {
@@ -145,7 +145,7 @@ func (s *Service) UpdateSegment(ctx context.Context, caseID, segmentID, key stri
 		return CaseView{}, err
 	}
 	cmd.ID = segmentID
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "update_segment", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
+	c, _, err := s.repo.Update(context.WithoutCancel(ctx), caseID, cmd.ExpectedVersion, meta(key, "update_segment", cmd.Actor, cmd), func(c *domain.ReleaseCase) error {
 		return c.UpdateSegment(domain.TranscriptSegment{ID: segmentID, StartMillis: cmd.StartMillis, EndMillis: cmd.EndMillis, SourceText: cmd.SourceText, ProposedText: cmd.ProposedText, SensitivityTag: cmd.SensitivityTag}, cmd.Actor, s.now())
 	})
 	if err != nil {
@@ -161,7 +161,7 @@ func (s *Service) DeleteSegment(ctx context.Context, caseID, segmentID, key stri
 	if err := authorize(cmd.Actor, roleOrganizer); err != nil {
 		return CaseView{}, err
 	}
-	c, _, err := s.repo.Update(ctx, caseID, cmd.ExpectedVersion, meta(key, "delete_segment:"+segmentID, cmd.Actor, cmd), func(c *domain.ReleaseCase) error { return c.DeleteSegment(segmentID, cmd.Actor, s.now()) })
+	c, _, err := s.repo.Update(context.WithoutCancel(ctx), caseID, cmd.ExpectedVersion, meta(key, "delete_segment:"+segmentID, cmd.Actor, cmd), func(c *domain.ReleaseCase) error { return c.DeleteSegment(segmentID, cmd.Actor, s.now()) })
 	if err != nil {
 		return CaseView{}, err
 	}
